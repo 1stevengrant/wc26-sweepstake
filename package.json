@@ -6,8 +6,11 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:roster": "tsc -b && VITE_PRELOAD_ROSTER=true vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "deploy": "npm run build && wrangler pages deploy dist --project-name=sweepstake --branch main --commit-dirty=true",
+    "deploy:roster": "npm run build:roster && wrangler pages deploy dist --project-name=wc26-sweepstake-draw --branch main --commit-dirty=true"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.0",

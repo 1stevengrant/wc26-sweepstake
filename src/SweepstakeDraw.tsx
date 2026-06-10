@@ -144,6 +144,10 @@ const ROSTER: Array<PlayerEntry> = [
   { name: "Social Team", entries: 1 },
 ];
 
+// Pre-fill the roster only when built with VITE_PRELOAD_ROSTER=true.
+// The default build starts with an empty player list.
+const PRELOAD_ROSTER = import.meta.env.VITE_PRELOAD_ROSTER === "true";
+
 const CURRENCIES: Array<string> = ["£", "$", "€", "NZ$"];
 const PLAYBACK_SPEEDS: Array<number> = [0.5, 1, 2];
 const STORAGE_PREFIX = "wc26-draw:";
@@ -316,7 +320,7 @@ function readSharedDraw(): DrawRecord | null {
 
 export function SweepstakeDraw() {
   const [players, setPlayers] = useState<Array<PlayerEntry>>(() =>
-    ROSTER.map((player) => ({ ...player }))
+    PRELOAD_ROSTER ? ROSTER.map((player) => ({ ...player })) : []
   );
   const [nameInput, setNameInput] = useState<string>("");
   const [fee, setFee] = useState<string>("");
