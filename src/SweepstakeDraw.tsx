@@ -114,6 +114,36 @@ const PALETTE = {
   grass: "#4cd08a",
 } as const;
 
+// --- Entrants (from the team sheet) — 48 entries across 26 players ---
+const ROSTER: Array<PlayerEntry> = [
+  { name: "Liam", entries: 2 },
+  { name: "Mikey", entries: 2 },
+  { name: "Mikey's Boy", entries: 2 },
+  { name: "Luke B", entries: 1 },
+  { name: "Tony Don", entries: 2 },
+  { name: "Lloyd", entries: 2 },
+  { name: "Ants", entries: 2 },
+  { name: "Dale", entries: 1 },
+  { name: "Hollins", entries: 2 },
+  { name: "Steven", entries: 2 },
+  { name: "Levi", entries: 2 },
+  { name: "Levi's Auntie", entries: 2 },
+  { name: "Scotty", entries: 2 },
+  { name: "Phil", entries: 2 },
+  { name: "Neil", entries: 4 },
+  { name: "Walshy", entries: 2 },
+  { name: "Kenty", entries: 2 },
+  { name: "Ben J", entries: 2 },
+  { name: "Bully", entries: 1 },
+  { name: "Cian", entries: 2 },
+  { name: "Ben Lund", entries: 1 },
+  { name: "Ben Shirley", entries: 3 },
+  { name: "Tommy", entries: 1 },
+  { name: "Tony Rid", entries: 2 },
+  { name: "Franz", entries: 1 },
+  { name: "Social Team", entries: 1 },
+];
+
 const CURRENCIES: Array<string> = ["£", "$", "€", "NZ$"];
 const PLAYBACK_SPEEDS: Array<number> = [0.5, 1, 2];
 const STORAGE_PREFIX = "wc26-draw:";
@@ -218,8 +248,76 @@ function removeDraw(id: string): void {
   localStorage.removeItem(STORAGE_PREFIX + id);
 }
 
+// --- Shareable links (the whole draw lives in the URL, no backend) ---
+const SHARE_PREFIX = "#/d/";
+
+function base64UrlEncode(bytes: Uint8Array): string {
+  let binary = "";
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function base64UrlDecode(value: string): Uint8Array {
+  const padded = value.replace(/-/g, "+").replace(/_/g, "/");
+  const binary = atob(padded);
+  return Uint8Array.from(binary, (char) => char.charCodeAt(0));
+}
+
+function encodeDraw(record: DrawRecord): string {
+  const payload = {
+    s: record.seed,
+    p: record.players.map((player) => [player.name, player.entries]),
+    f: record.fee,
+    c: record.currency,
+    l: record.label,
+  };
+  const bytes = new TextEncoder().encode(JSON.stringify(payload));
+  return base64UrlEncode(bytes);
+}
+
+function decodeDraw(encoded: string): DrawRecord | null {
+  try {
+    const json = new TextDecoder().decode(base64UrlDecode(encoded));
+    const payload = JSON.parse(json) as Record<string, unknown>;
+    const rawPlayers = Array.isArray(payload.p) ? payload.p : [];
+    const players: Array<PlayerEntry> = rawPlayers.map((entry) => {
+      const [name, entries] = entry as [unknown, unknown];
+      return {
+        name: String(name ?? ""),
+        entries: Math.max(1, Number(entries ?? 1)),
+      };
+    });
+    if (players.length === 0) return null;
+    return {
+      id: "shared",
+      seed: Number(payload.s ?? 0) >>> 0,
+      players,
+      fee: String(payload.f ?? ""),
+      currency: String(payload.c ?? "£"),
+      createdAt: Date.now(),
+      label: payload.l == null ? null : String(payload.l),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function shareLinkFor(record: DrawRecord): string {
+  return `${window.location.origin}${window.location.pathname}${SHARE_PREFIX}${encodeDraw(record)}`;
+}
+
+function readSharedDraw(): DrawRecord | null {
+  const hash = window.location.hash;
+  if (!hash.startsWith(SHARE_PREFIX)) return null;
+  return decodeDraw(hash.slice(SHARE_PREFIX.length));
+}
+
 export function SweepstakeDraw() {
-  const [players, setPlayers] = useState<Array<PlayerEntry>>([]);
+  const [players, setPlayers] = useState<Array<PlayerEntry>>(() =>
+    ROSTER.map((player) => ({ ...player }))
+  );
   const [nameInput, setNameInput] = useState<string>("");
   const [fee, setFee] = useState<string>("");
   const [currency, setCurrency] = useState<string>("£");
@@ -232,6 +330,7 @@ export function SweepstakeDraw() {
   const [saved, setSaved] = useState<Array<DrawRecord>>([]);
   const [storageOk, setStorageOk] = useState<boolean>(true);
   const [copied, setCopied] = useState<boolean>(false);
+  const [linkCopied, setLinkCopied] = useState<boolean>(false);
   const timer = useRef<number | null>(null);
 
   const refreshSaved = useCallback((): void => {
@@ -245,6 +344,18 @@ export function SweepstakeDraw() {
   useEffect(() => {
     refreshSaved();
   }, [refreshSaved]);
+
+  // A shared link (#/d/...) opens straight into that draw and replays it.
+  useEffect(() => {
+    const shared = readSharedDraw();
+    if (!shared) return;
+    setDraw(shared);
+    setPlayers(shared.players.map((player) => ({ ...player })));
+    setFee(shared.fee || "");
+    setCurrency(shared.currency || "£");
+    setRevealIndex(0);
+    setPlaying(true);
+  }, []);
 
   const sequence: DrawSequence = useMemo(
     () => (draw ? buildSequence(draw.players, draw.seed) : { picks: [], undrawn: [] }),
@@ -382,6 +493,18 @@ export function SweepstakeDraw() {
     }
   }
 
+  function copyShareLink(): void {
+    if (!draw) return;
+    const link = shareLinkFor(draw);
+    navigator.clipboard?.writeText(link).then(
+      () => {
+        setLinkCopied(true);
+        window.setTimeout(() => setLinkCopied(false), 2000);
+      },
+      () => {}
+    );
+  }
+
   function copyResults(): void {
     if (!draw) return;
     const full = buildSequence(draw.players, draw.seed);
@@ -463,6 +586,17 @@ export function SweepstakeDraw() {
 
         {!draw && (
           <>
+            <section className="rounded-2xl p-5 sm:p-6 mb-6" style={{ background: PALETTE.card, border: `1px solid ${PALETTE.faint}` }}>
+              <h2 className="disp text-sm uppercase tracking-[0.2em] mb-3" style={{ color: PALETTE.gold }}>How the draw works</h2>
+              <ul className="space-y-1.5 text-sm" style={{ color: PALETTE.muted }}>
+                <li>It's like pulling names out of a hat. Every team goes in one hat; every player's name goes in another, once for each team they paid for.</li>
+                <li>The computer shuffles both and matches them up — one team, one name — until they're all gone.</li>
+                <li>A <span style={{ color: PALETTE.line }}>seed</span> number controls the shuffle. The same number always gives the same result, so it's shown as proof nobody fiddled it.</li>
+                <li>Good teams aren't more likely to go to anyone. The badges (group &amp; ranking) are just info — they don't change anything.</li>
+                <li>The play/pause controls are just a replay. The teams were decided the moment you pressed start.</li>
+              </ul>
+            </section>
+
             <section className="relative rounded-2xl p-5 sm:p-6 mb-6" style={{ background: PALETTE.card, border: `1px solid ${PALETTE.faint}` }}>
               <div className="grid gap-6 md:grid-cols-[1.4fr_1fr]">
                 <div>
@@ -602,8 +736,9 @@ export function SweepstakeDraw() {
 
               <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t pt-4" style={{ borderColor: PALETTE.faint }}>
                 <button onClick={exitDraw} className="text-sm underline-offset-4 hover:underline" style={{ color: PALETTE.muted }}>← New draw</button>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <button onClick={copyResults} className="text-sm underline-offset-4 hover:underline" style={{ color: PALETTE.muted }}>{copied ? "Copied ✓" : "Copy results"}</button>
+                  <button onClick={copyShareLink} className="disp rounded-lg px-4 py-1.5 text-xs font-semibold uppercase" style={{ background: PALETTE.gold, color: PALETTE.fieldDeep }}>{linkCopied ? "Link copied ✓" : "Copy share link"}</button>
                   {storageOk && (
                     <button onClick={saveRecording} className="disp rounded-lg px-4 py-1.5 text-xs font-semibold uppercase" style={{ background: PALETTE.grass, color: PALETTE.fieldDeep }}>Save recording</button>
                   )}
@@ -655,6 +790,18 @@ export function SweepstakeDraw() {
             )}
           </section>
         )}
+
+        <footer className="mt-10 border-t pt-6 text-center text-xs" style={{ borderColor: PALETTE.faint, color: PALETTE.muted }}>
+          <a
+            href="https://github.com/1stevengrant/wc26-sweepstake"
+            target="_blank"
+            rel="noreferrer"
+            className="underline-offset-4 hover:underline"
+            style={{ color: PALETTE.muted }}
+          >
+            Source on GitHub
+          </a>
+        </footer>
       </div>
     </div>
   );
